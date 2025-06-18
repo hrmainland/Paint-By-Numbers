@@ -1,6 +1,6 @@
 var baseUrl;
 
-if (import.meta.env.NODE_ENV === "production") {
+if (process.env.NODE_ENV === "production") {
   baseUrl = "";
 } else {
   baseUrl = "/api";
