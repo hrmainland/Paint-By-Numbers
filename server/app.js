@@ -3,6 +3,7 @@ const cors = require("cors");
 const mongoose = require('mongoose');
 require('dotenv').config({ path: '../.env' });
 const supabase = require('./supabase');
+const path = require('path');
 
 const app = express();
 
@@ -37,3 +38,14 @@ app.get("/db-test", async (req, res) => {
         res.status(500).json({ error: 'Failed to fetch data from database' });
     }
 })
+
+// Serve static files in production
+if (process.env.NODE_ENV !== "dev") {
+    // Serve static files from the 'dist' directory
+    app.use(express.static(path.join(__dirname, "../client/dist")));
+
+    // Handle all other routes by serving index.html
+    app.use((req, res) => {
+        res.sendFile(path.join(__dirname, "../client/dist/index.html"));
+    });
+}
