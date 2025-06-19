@@ -1,14 +1,31 @@
-const express = require("express");
-const cors = require("cors");
-const mongoose = require('mongoose');
-require('dotenv').config({ path: '../.env' });
-const supabase = require('./supabase');
-const path = require('path');
+import express from "express";
+import cors from "cors";
+import mongoose from "mongoose";
+import dotenv from "dotenv";
+import path, { resolve } from "path";
+import fs from "fs";
+import fetch from "node-fetch";
+import sharp from "sharp";
+import OpenAI from "openai";
+import supabase from "./supabase.js";
+import { toFile } from "openai";
+import { createReadStream, writeFileSync } from "fs";
+
+dotenv.config();
+
+import { fileURLToPath } from "url";
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 
+// Initialize OpenAI
+const openai = new OpenAI({
+  apiKey: process.env.OPEN_AI_API_KEY,
+});
+
 // Enable CORS for all routes
-app.use(cors()); 
+app.use(cors());
 
 // Parse JSON bodies
 app.use(express.json());
@@ -17,35 +34,83 @@ app.use(express.json());
 const port = process.env.PORT || 3500;
 
 app.listen(port, () => {
-	console.log("Server running on port", port)
-})
+  console.log("Server running on port", port);
+});
 
 app.get("/server-test", (req, res) => {
-    res.status(200).json("This text is coming from the backend server (app.js) ✅")
-})
+  res
+    .status(200)
+    .json("This text is coming from the backend server (app.js) ✅");
+});
 
 app.get("/db-test", async (req, res) => {
-    try {
-        const { data, error } = await supabase
-            .from('todos')
-            .select('*')
-            .limit(5);
-        
-        if (error) throw error;
-        res.status(200).json(data);
-    } catch (error) {
-        console.error('Database error:', error);
-        res.status(500).json({ error: 'Failed to fetch data from database' });
-    }
-})
+  try {
+    const { data, error } = await supabase.from("todos").select("*").limit(5);
+
+    if (error) throw error;
+    res.status(200).json(data);
+  } catch (error) {
+    console.error("Database error:", error);
+    res.status(500).json({ error: "Failed to fetch data from database" });
+  }
+});
+app.post("/edit-image", async (req, res) => {
+  const { imageUrl, prompt } = req.body;
+
+  if (!imageUrl || !prompt) {
+    return res.status(400).json({ error: "imageUrl and prompt required" });
+  }
+
+  try {
+    // Step 1: Download image
+    const imageResponse = await fetch(imageUrl);
+    if (!imageResponse.ok) throw new Error("Image fetch failed");
+
+    const arrayBuffer = await imageResponse.arrayBuffer();
+    const imageBuffer = Buffer.from(arrayBuffer);
+
+    // Step 2: Convert to PNG
+    const tempImagePath = resolve(__dirname, "temp-upload.png");
+    await sharp(imageBuffer)
+      .resize(1024, 1024) // enforce square size
+      .ensureAlpha() // add alpha channel if missing
+      .png()
+      .toFile(tempImagePath);
+
+    // Step 3: Send to OpenAI
+    const openaiResponse = await openai.images.edit({
+      model: "gpt-image-1",
+      image: await toFile(createReadStream(tempImagePath), null, {
+        type: "image/png",
+      }),
+      prompt,
+      n: 1,
+      size: "1024x1024",
+    });
+
+    const base64 = openaiResponse.data[0].b64_json;
+    const outputPath = resolve(__dirname, "edited-image.png");
+    writeFileSync(outputPath, Buffer.from(base64, "base64"));
+
+    res.status(200).json({
+      success: true,
+      editedImageBase64: base64, // or just send back a file URL if saved to S3
+    });
+  } catch (err) {
+    console.error("❌ Error in image edit:", err.message);
+    res
+      .status(500)
+      .json({ error: "Image editing failed", details: err.message });
+  }
+});
 
 // Serve static files in production
 if (process.env.NODE_ENV !== "dev") {
-    // Serve static files from the 'dist' directory
-    app.use(express.static(path.join(__dirname, "../client/dist")));
+  // Serve static files from the 'dist' directory
+  app.use(express.static(path.join(__dirname, "../client/dist")));
 
-    // Handle all other routes by serving index.html
-    app.use((req, res) => {
-        res.sendFile(path.join(__dirname, "../client/dist/index.html"));
-    });
+  // Handle all other routes by serving index.html
+  app.use((req, res) => {
+    res.sendFile(path.join(__dirname, "../client/dist/index.html"));
+  });
 }
