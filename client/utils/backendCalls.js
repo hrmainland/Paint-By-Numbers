@@ -39,3 +39,7 @@ export async function serverTest() {
 export async function dbTest() {
     return await apiRequest("/db-test");
 }
+
+export async function editImage(imageUrl, prompt) {
+    return await apiRequest("/edit-image", "POST", { imageUrl, prompt });
+}
