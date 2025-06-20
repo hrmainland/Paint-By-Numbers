@@ -2,14 +2,13 @@ import express from "express";
 import cors from "cors";
 import mongoose from "mongoose";
 import dotenv from "dotenv";
-import path, { resolve } from "path";
+import path from "path";
 import fs from "fs";
 import fetch from "node-fetch";
 import sharp from "sharp";
 import OpenAI from "openai";
 import supabase from "./supabase.js";
 import { toFile } from "openai";
-import { createReadStream, writeFileSync } from "fs";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import multer from "multer";
 
@@ -82,6 +81,7 @@ app.get("/db-test", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch data from database" });
   }
 });
+
 app.post("/upload-image", upload.single('image'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: "No image file provided" });
@@ -138,18 +138,17 @@ app.post("/edit-image", async (req, res) => {
     const arrayBuffer = await imageResponse.arrayBuffer();
     const imageBuffer = Buffer.from(arrayBuffer);
 
-    // Step 2: Convert to PNG
-    const tempImagePath = resolve(__dirname, "temp-upload.png");
-    await sharp(imageBuffer)
+    // Step 2: Convert to PNG in memory
+    const processedImageBuffer = await sharp(imageBuffer)
       .resize(1024, 1024) // enforce square size
       .ensureAlpha() // add alpha channel if missing
       .png()
-      .toFile(tempImagePath);
+      .toBuffer();
 
-    // Step 3: Send to OpenAI
+    // Step 3: Send to OpenAI using buffer directly
     const openaiResponse = await openai.images.edit({
       model: "gpt-image-1",
-      image: await toFile(createReadStream(tempImagePath), null, {
+      image: await toFile(processedImageBuffer, null, {
         type: "image/png",
       }),
       prompt,
@@ -158,12 +157,10 @@ app.post("/edit-image", async (req, res) => {
     });
 
     const base64 = openaiResponse.data[0].b64_json;
-    const outputPath = resolve(__dirname, "edited-image.png");
-    writeFileSync(outputPath, Buffer.from(base64, "base64"));
 
     res.status(200).json({
       success: true,
-      editedImageBase64: base64, // or just send back a file URL if saved to S3
+      editedImageBase64: base64,
     });
   } catch (err) {
     console.error("❌ Error in image edit:", err.message);
