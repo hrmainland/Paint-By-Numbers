@@ -40,6 +40,28 @@ export async function dbTest() {
     return await apiRequest("/db-test");
 }
 
+export async function uploadImage(file) {
+    const formData = new FormData();
+    formData.append('image', file);
+    
+    try {
+      const response = await fetch(`${baseUrl}/upload-image`, {
+        method: 'POST',
+        body: formData,
+      });
+  
+      if (!response.ok) {
+        throw new Error(`HTTP error - status: ${response.status}`);
+      }
+  
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error('There was a problem with the image upload request', error);
+      throw error;
+    }
+}
+
 export async function editImage(imageUrl, prompt) {
     return await apiRequest("/edit-image", "POST", { imageUrl, prompt });
 }

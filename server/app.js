@@ -10,6 +10,8 @@ import OpenAI from "openai";
 import supabase from "./supabase.js";
 import { toFile } from "openai";
 import { createReadStream, writeFileSync } from "fs";
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import multer from "multer";
 
 dotenv.config();
 
@@ -22,6 +24,32 @@ const app = express();
 // Initialize OpenAI
 const openai = new OpenAI({
   apiKey: process.env.OPEN_AI_API_KEY,
+});
+
+// Initialize S3 client
+const s3 = new S3Client({
+  region: process.env.AWS_REGION,
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  },
+});
+
+const bucketName = process.env.AWS_S3_BUCKET_NAME;
+
+// Configure multer for handling file uploads
+const upload = multer({ 
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed'), false);
+    }
+  }
 });
 
 // Enable CORS for all routes
@@ -54,6 +82,47 @@ app.get("/db-test", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch data from database" });
   }
 });
+app.post("/upload-image", upload.single('image'), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: "No image file provided" });
+  }
+
+  try {
+    // Generate unique filename
+    const key = `uploads/image-${Date.now()}-${Math.random().toString(36).substring(2)}.png`;
+    
+    // Convert image to PNG format using Sharp
+    const processedImageBuffer = await sharp(req.file.buffer)
+      .png()
+      .toBuffer();
+
+    // Upload to S3
+    const uploadCommand = new PutObjectCommand({
+      Bucket: bucketName,
+      Key: key,
+      Body: processedImageBuffer,
+      ContentType: "image/png",
+    });
+
+    await s3.send(uploadCommand);
+    
+    // Generate the public URL
+    const imageUrl = `https://${bucketName}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`;
+    
+    res.status(200).json({
+      success: true,
+      imageUrl: imageUrl,
+      message: "Image uploaded successfully"
+    });
+  } catch (err) {
+    console.error("❌ Error uploading image:", err.message);
+    res.status(500).json({ 
+      error: "Image upload failed", 
+      details: err.message 
+    });
+  }
+});
+
 app.post("/edit-image", async (req, res) => {
   const { imageUrl, prompt } = req.body;
 
